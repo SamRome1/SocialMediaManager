@@ -45,6 +45,16 @@ export interface Simulation {
   cta: string
   predicted_score: number
   why: string
+  content_type: string
+  is_proven: boolean
+  estimated_time: string
+  views_low: number
+  views_high: number
+  eng_low: number
+  eng_high: number
+  followers_low: number
+  followers_high: number
+  signal: string
   published: boolean
   created_at: string
 }
@@ -73,6 +83,67 @@ export interface SimulationIdea {
   cta: string
   predicted_score: number
   why: string
+  content_type: string
+  is_proven: boolean
+  estimated_time: string
+  views_low: number
+  views_high: number
+  eng_low: number
+  eng_high: number
+  followers_low: number
+  followers_high: number
+  signal: 'POST' | 'TEST' | 'SKIP'
+}
+
+export interface ModelConfidenceMetric {
+  value: number
+  sublabel: string
+}
+
+export interface ModelConfidence {
+  viral_formula_match: ModelConfidenceMetric
+  prediction_accuracy: ModelConfidenceMetric
+  flop_risk: ModelConfidenceMetric
+}
+
+export interface PatternRow {
+  label: string
+  avg_views: number
+}
+
+export interface PatternEvidence {
+  format: PatternRow[]
+  duration: PatternRow[]
+  topic: PatternRow[]
+}
+
+export interface PlaybookItem {
+  label: string
+  detail: string
+}
+
+export interface Playbook {
+  always: PlaybookItem[]
+  never: PlaybookItem[]
+}
+
+export interface OptimalSpec {
+  label: string
+  value: string
+}
+
+export interface OptimalSpecs {
+  duration: string
+  items?: number
+  extras: OptimalSpec[]
+}
+
+export interface SimulationAnalysis {
+  model_confidence: ModelConfidence
+  ideas: SimulationIdea[]
+  pattern_evidence: PatternEvidence
+  playbook: Playbook
+  optimal_specs: OptimalSpecs
 }
 
 export interface PlatformStat {

@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
-import type { Post, AuditResult, SimulationIdea, Settings } from '@/types'
+import type { Post, AuditResult, SimulationAnalysis, Settings } from '@/types'
 
 const MODEL = 'claude-sonnet-4-6'
 
@@ -59,36 +59,97 @@ export async function runSimulation(
   format: string,
   topic: string,
   settings: Pick<Settings, 'brand_name' | 'niche' | 'tone'>,
-): Promise<SimulationIdea[]> {
+  posts: Post[],
+): Promise<SimulationAnalysis> {
   const client = getClient()
 
-  const prompt = `You are a viral content strategist. Generate 5 content ideas for the brand "${settings.brand_name}" in the "${settings.niche}" niche with a "${settings.tone}" tone.
+  const postsContext = posts.length > 0
+    ? posts
+        .slice(0, 30)
+        .map(
+          (p) =>
+            `Format: ${p.format} | Reach: ${p.reach} | Likes: ${p.likes} | Comments: ${p.comments} | Content: ${p.content.slice(0, 200)}`,
+        )
+        .join('\n')
+    : 'No historical post data available.'
 
-Platform: ${platform}
-Format: ${format}
-Topic: ${topic}
+  const prompt = `You are a viral content strategist analyzing real post performance data for a creator.
 
-Return ONLY a valid JSON array with exactly 5 objects, each with this shape:
+Brand: "${settings.brand_name}" | Niche: "${settings.niche}" | Tone: "${settings.tone}"
+Platform: ${platform} | Format: ${format} | Topic: ${topic}
+
+Historical post data (use this to ground ALL predictions):
+${postsContext}
+
+Generate a comprehensive content simulation. Return ONLY valid JSON matching this exact shape:
+
 {
-  "hook": "attention-grabbing opening line or visual description",
-  "script": "full content outline or script (2-4 sentences)",
-  "cta": "specific call to action",
-  "predicted_score": <number 0-100>,
-  "why": "1-2 sentence explanation of why this will perform well"
-}`
+  "model_confidence": {
+    "viral_formula_match": { "value": <0-100>, "sublabel": "<what drives this score, e.g. '3/3 viral posts used this format'>" },
+    "prediction_accuracy": { "value": <0-100>, "sublabel": "<confidence basis, e.g. '12 posts with known outcomes'>" },
+    "flop_risk": { "value": <0-100>, "sublabel": "<what drives risk, e.g. 'Generic AI content avg 1.7K views'>" }
+  },
+  "ideas": [
+    {
+      "hook": "<compelling content title, not a hook line — e.g. '3 Claude Code Tricks That Replace Paid Tools'>",
+      "script": "<full content outline, 2-4 sentences>",
+      "cta": "<specific call to action>",
+      "predicted_score": <0-100>,
+      "why": "<1-2 sentence explanation grounded in the data>",
+      "content_type": "<one of: 3-list, Story, Hot Take, Tutorial, Compare, News, Lifestyle, Review>",
+      "is_proven": <true if this content type has historically performed well based on the data>,
+      "estimated_time": "<e.g. '40s', '60s', '90s', '2min'>",
+      "views_low": <conservative view estimate as integer>,
+      "views_high": <optimistic view estimate as integer>,
+      "eng_low": <conservative engagement rate as decimal, e.g. 4.5>,
+      "eng_high": <optimistic engagement rate as decimal, e.g. 6.8>,
+      "followers_low": <conservative new followers estimate as integer>,
+      "followers_high": <optimistic new followers estimate as integer>,
+      "signal": "<POST if predicted_score >= 70, TEST if 40-69, SKIP if below 40>"
+    }
+  ],
+  "pattern_evidence": {
+    "format": [
+      { "label": "<format name>", "avg_views": <integer> }
+    ],
+    "duration": [
+      { "label": "<duration range e.g. '40-57s'>", "avg_views": <integer> }
+    ],
+    "topic": [
+      { "label": "<topic cluster>", "avg_views": <integer> }
+    ]
+  },
+  "playbook": {
+    "always": [
+      { "label": "<bold strategy label>", "detail": "<supporting data from posts, be specific with numbers>" }
+    ],
+    "never": [
+      { "label": "<bold anti-pattern label>", "detail": "<supporting data showing why this fails, be specific>" }
+    ]
+  },
+  "optimal_specs": {
+    "duration": "<best performing duration range>",
+    "items": <number of items for list posts, or null>,
+    "extras": [
+      { "label": "<spec name>", "value": "<optimal value>" }
+    ]
+  }
+}
+
+Generate exactly 7 ideas sorted by predicted_score descending. Ground every number in the historical data — if data is sparse, acknowledge that in sublabels. Include 3-5 entries in each pattern_evidence array, 4-6 playbook items per column, and 2-4 extras in optimal_specs.`
 
   const message = await client.messages.create({
     model: MODEL,
-    max_tokens: 2048,
+    max_tokens: 4096,
     messages: [{ role: 'user', content: prompt }],
   })
 
   const text = message.content[0].type === 'text' ? message.content[0].text : ''
-  const jsonMatch = text.match(/\[[\s\S]*\]/)
-  if (!jsonMatch) throw new Error('Claude did not return valid JSON array')
+  const jsonMatch = text.match(/\{[\s\S]*\}/)
+  if (!jsonMatch) throw new Error('Claude did not return valid JSON')
 
-  const ideas = JSON.parse(jsonMatch[0]) as SimulationIdea[]
-  return ideas
+  const analysis = JSON.parse(jsonMatch[0]) as SimulationAnalysis
+  return analysis
 }
 
 // ── Trends (streaming) ───────────────────────────────────────────────────────
