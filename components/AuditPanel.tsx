@@ -6,7 +6,7 @@ import { AuditResult } from './AuditResult'
 import type { Audit } from '@/types'
 import { PLATFORMS, PLATFORM_LABELS, type Platform } from '@/types'
 
-export function AuditPanel() {
+export function AuditPanel({ timePeriod = '1m', onScrapeComplete }: { timePeriod?: '1w' | '1m' | '3m' | '6m'; onScrapeComplete?: () => void }) {
   const [open, setOpen] = useState(false)
   const [platform, setPlatform] = useState<Platform>('instagram')
   const [handle, setHandle] = useState('')
@@ -23,11 +23,13 @@ export function AuditPanel() {
       const res = await fetch('/api/scrape', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ platform, handle }),
+        body: JSON.stringify({ platform, handle, timePeriod }),
       })
-      const data = await res.json() as { error?: string; inserted?: number }
+      const data = await res.json() as { error?: string; inserted?: number; skipped?: number }
       if (!res.ok) throw new Error(data.error ?? 'Scrape failed')
-      setMsg({ type: 'success', text: `Imported ${data.inserted} posts from ${handle}` })
+      const skippedNote = data.skipped ? ` (${data.skipped} duplicates skipped)` : ''
+      setMsg({ type: 'success', text: `Imported ${data.inserted} posts from ${handle}${skippedNote}` })
+      onScrapeComplete?.()
     } catch (err) {
       setMsg({ type: 'error', text: err instanceof Error ? err.message : 'Scrape failed' })
     } finally {

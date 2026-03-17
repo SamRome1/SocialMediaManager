@@ -1,6 +1,7 @@
 export interface Post {
   id: string
   platform: string
+  source_id: string | null
   content: string
   format: string
   likes: number
@@ -156,9 +157,9 @@ export interface PlatformStat {
   avgEngRate: number
 }
 
-export type Platform = 'instagram' | 'tiktok' | 'twitter' | 'linkedin' | 'youtube'
+export type Platform = 'instagram' | 'tiktok' | 'twitter' | 'linkedin' | 'youtube' | 'facebook'
 
-export const PLATFORMS: Platform[] = ['instagram', 'tiktok', 'twitter', 'linkedin', 'youtube']
+export const PLATFORMS: Platform[] = ['instagram', 'tiktok', 'twitter', 'linkedin', 'youtube', 'facebook']
 
 export const PLATFORM_LABELS: Record<Platform, string> = {
   instagram: 'Instagram',
@@ -166,4 +167,5 @@ export const PLATFORM_LABELS: Record<Platform, string> = {
   twitter: 'Twitter/X',
   linkedin: 'LinkedIn',
   youtube: 'YouTube',
+  facebook: 'Facebook',
 }

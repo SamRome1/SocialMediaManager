@@ -6,6 +6,7 @@ const PLATFORM_STYLES: Record<Platform, string> = {
   twitter: 'bg-sky-500/10 text-sky-400 border-sky-500/20',
   linkedin: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
   youtube: 'bg-red-500/10 text-red-400 border-red-500/20',
+  facebook: 'bg-blue-600/10 text-blue-500 border-blue-600/20',
 }
 
 interface Props {

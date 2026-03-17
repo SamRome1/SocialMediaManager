@@ -22,19 +22,22 @@ function engRateColor(rate: number): string {
   return 'text-gray-400'
 }
 
+const PAGE_SIZE_OPTIONS = [10, 25, 50]
 type FilterPlatform = Platform | 'all'
 
 export function PostsTable() {
   const [selected, setSelected] = useState<FilterPlatform>('all')
   const [posts, setPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
 
   const fetchPosts = useCallback(async () => {
     setLoading(true)
     try {
       const url = selected === 'all'
-        ? '/api/posts?limit=100'
-        : `/api/posts?platform=${selected}&limit=100`
+        ? '/api/posts?limit=200'
+        : `/api/posts?platform=${selected}&limit=200`
       const res = await fetch(url)
       if (res.ok) setPosts(await res.json() as Post[])
     } finally {
@@ -44,7 +47,12 @@ export function PostsTable() {
 
   useEffect(() => { void fetchPosts() }, [fetchPosts])
 
+  // Reset to page 1 when filter or page size changes
+  useEffect(() => { setPage(1) }, [selected, pageSize])
+
   const sorted = [...posts].sort((a, b) => b.reach - a.reach)
+  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize))
+  const pagePosts = sorted.slice((page - 1) * pageSize, page * pageSize)
 
   return (
     <div>
@@ -111,7 +119,7 @@ export function PostsTable() {
                 </td>
               </tr>
             ) : (
-              sorted.map((post, i) => {
+              pagePosts.map((post, i) => {
                 const rate = engRate(post)
                 const date = new Date(post.posted_at)
                 const dateStr = isNaN(date.getTime())
@@ -155,6 +163,60 @@ export function PostsTable() {
           </tbody>
         </table>
       </div>
+
+      {/* Pagination footer */}
+      {!loading && sorted.length > 0 && (
+        <div className="mt-3 flex items-center justify-between text-xs text-gray-500">
+          <div className="flex items-center gap-2">
+            <span>Rows per page</span>
+            <select
+              value={pageSize}
+              onChange={(e) => setPageSize(Number(e.target.value))}
+              className="rounded border border-white/10 bg-white/5 px-2 py-1 text-gray-300 focus:outline-none"
+            >
+              {PAGE_SIZE_OPTIONS.map((n) => (
+                <option key={n} value={n}>{n}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <span>
+              {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, sorted.length)} of {sorted.length}
+            </span>
+            <div className="flex gap-1">
+              <button
+                onClick={() => setPage(1)}
+                disabled={page === 1}
+                className="rounded px-2 py-1 transition hover:bg-white/10 disabled:opacity-30"
+              >
+                «
+              </button>
+              <button
+                onClick={() => setPage((p) => p - 1)}
+                disabled={page === 1}
+                className="rounded px-2 py-1 transition hover:bg-white/10 disabled:opacity-30"
+              >
+                ‹
+              </button>
+              <button
+                onClick={() => setPage((p) => p + 1)}
+                disabled={page === totalPages}
+                className="rounded px-2 py-1 transition hover:bg-white/10 disabled:opacity-30"
+              >
+                ›
+              </button>
+              <button
+                onClick={() => setPage(totalPages)}
+                disabled={page === totalPages}
+                className="rounded px-2 py-1 transition hover:bg-white/10 disabled:opacity-30"
+              >
+                »
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -1,12 +1,12 @@
+'use client'
+
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { supabase } from '@/lib/supabase'
 import { PlatformBadge } from '@/components/PlatformBadge'
 import { PostsTable } from '@/components/PostsTable'
 import { AuditPanel } from '@/components/AuditPanel'
 import type { Post, Profile, PlatformStat } from '@/types'
 import { PLATFORM_LABELS, type Platform } from '@/types'
-
-export const dynamic = 'force-dynamic'
 
 function fmt(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
@@ -17,31 +17,6 @@ function fmt(n: number): string {
 function growthPct(current: number, previous: number): number | null {
   if (!previous || previous === 0) return null
   return ((current - previous) / previous) * 100
-}
-
-async function getDashboardData() {
-  const [postStatsRes, topPostsRes, profilesRes, settingsRes] = await Promise.all([
-    // Lightweight: only metric columns for aggregation
-    supabase
-      .from('posts')
-      .select('platform, likes, comments, shares, reach')
-      .limit(1000),
-    // Top 3 posts by reach across all platforms
-    supabase
-      .from('posts')
-      .select('id, platform, content, likes, comments, shares, reach, posted_at, format')
-      .order('reach', { ascending: false })
-      .limit(3),
-    supabase.from('profiles').select('*').order('scraped_at', { ascending: false }),
-    supabase.from('settings').select('brand_name, niche, platforms').limit(1).single(),
-  ])
-
-  return {
-    postStats: postStatsRes.data ?? [],
-    topPosts: (topPostsRes.data ?? []) as Post[],
-    profiles: (profilesRes.data ?? []) as Profile[],
-    settings: settingsRes.data,
-  }
 }
 
 function buildPlatformStats(
@@ -78,9 +53,51 @@ function buildPlatformStats(
   }))
 }
 
-export default async function DashboardPage() {
-  const { postStats, topPosts, profiles, settings } = await getDashboardData()
+export default function DashboardPage() {
+  const [timePeriod, setTimePeriod] = useState<'1w' | '1m' | '3m' | '6m'>('1m')
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [data, setData] = useState<{
+    postStats: Array<{ platform: string; likes: number; comments: number; shares: number; reach: number }>
+    topPosts: Post[]
+    profiles: Profile[]
+    settings: any
+  } | null>(null)
+  const [loading, setLoading] = useState(true)
 
+  useEffect(() => {
+    async function loadData() {
+      setLoading(true)
+      try {
+        const res = await fetch('/api/dashboard', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ timePeriod }),
+        })
+        if (res.ok) {
+          const dashData = await res.json()
+          setData(dashData)
+        }
+      } catch (err) {
+        console.error('Failed to load dashboard data:', err)
+      } finally {
+        setLoading(false)
+      }
+    }
+    void loadData()
+  }, [timePeriod, refreshKey])
+
+  if (loading || !data) {
+    return (
+      <div className="space-y-10">
+        <div className="animate-pulse">
+          <div className="h-8 w-32 rounded bg-white/10" />
+          <div className="mt-2 h-4 w-48 rounded bg-white/5" />
+        </div>
+      </div>
+    )
+  }
+
+  const { postStats, topPosts, profiles, settings } = data
   const platformStats = buildPlatformStats(postStats)
   const activePlatforms = (settings?.platforms as string[] | null) ?? []
 
@@ -113,6 +130,30 @@ export default async function DashboardPage() {
           </Link>
         )}
       </div>
+
+      {/* ── Time Period Selector ────────────────────────────────── */}
+      <div className="flex gap-2">
+        {(['1w', '1m', '3m', '6m'] as const).map((period) => {
+          const labels = { '1w': '1 Week', '1m': '1 Month', '3m': '3 Months', '6m': '6 Months' }
+          const isActive = timePeriod === period
+          return (
+            <button
+              key={period}
+              onClick={() => setTimePeriod(period)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                isActive
+                  ? 'bg-cyan-500 text-white'
+                  : 'bg-white/5 border border-white/10 text-gray-400 hover:border-white/20 hover:bg-white/10'
+              }`}
+            >
+              {labels[period]}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Scrape & Audit panel */}
+      <AuditPanel timePeriod={timePeriod} onScrapeComplete={() => setRefreshKey((k) => k + 1)} />
 
       {/* ── CHANNELS ─────────────────────────────────────────────────────────── */}
       {activePlatforms.length > 0 && (
@@ -311,7 +352,7 @@ export default async function DashboardPage() {
                             ? 'text-yellow-400'
                             : 'text-gray-400'
                       }`}>
-                        {stat.avgEngRate.toFixed(2)}%
+                        {stat.totalViews === 0 ? <span className="text-gray-600 text-xs">No views data</span> : `${stat.avgEngRate.toFixed(2)}%`}
                       </td>
                     </tr>
                   ))}
@@ -321,8 +362,6 @@ export default async function DashboardPage() {
         </section>
       )}
 
-      {/* Scrape & Audit panel */}
-      <AuditPanel />
     </div>
   )
 }

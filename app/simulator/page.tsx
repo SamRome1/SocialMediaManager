@@ -18,6 +18,7 @@ const FORMAT_OPTIONS: Record<Platform, string[]> = {
   twitter: ['Tweet', 'Thread', 'Poll', 'Space'],
   linkedin: ['Post', 'Article', 'Newsletter', 'Video'],
   youtube: ['Long-form', 'Short', 'Podcast', 'Live Stream'],
+  facebook: ['Post', 'Reel', 'Story', 'Live'],
 }
 
 function fmt(n: number): string {
@@ -102,11 +103,7 @@ function PatternBars({ rows, title }: { rows: PatternRow[]; title: string }) {
 }
 
 export default function SimulatorPage() {
-  const [platform, setPlatform] = useState<Platform>('instagram')
-  const [format, setFormat] = useState(FORMAT_OPTIONS.instagram[0])
-  const [topic, setTopic] = useState('')
   const [simulations, setSimulations] = useState<Simulation[]>([])
-  const [history, setHistory] = useState<Simulation[]>([])
   const [modelConfidence, setModelConfidence] = useState<ModelConfidence | null>(null)
   const [patternEvidence, setPatternEvidence] = useState<PatternEvidence | null>(null)
   const [playbook, setPlaybook] = useState<Playbook | null>(null)
@@ -115,13 +112,11 @@ export default function SimulatorPage() {
   const [postsAnalyzed, setPostsAnalyzed] = useState(0)
   const [platformLabels, setPlatformLabels] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
-  const [loadingHistory, setLoadingHistory] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => { setFormat(FORMAT_OPTIONS[platform][0]) }, [platform])
   useEffect(() => {
-    void loadHistory()
     void loadStats()
+    void loadSavedData()
   }, [])
 
   async function loadStats() {
@@ -136,30 +131,40 @@ export default function SimulatorPage() {
     } catch { /* non-critical */ }
   }
 
-  async function loadHistory() {
-    setLoadingHistory(true)
+  async function loadSavedData() {
+    setLoading(true)
     try {
-      const res = await fetch('/api/simulations')
-      if (res.ok) setHistory(await res.json() as Simulation[])
-    } finally {
-      setLoadingHistory(false)
-    }
+      const [simsRes, runRes] = await Promise.all([
+        fetch('/api/simulations?limit=7'),
+        fetch('/api/simulation-runs'),
+      ])
+      if (simsRes.ok) setSimulations(await simsRes.json() as Simulation[])
+      if (runRes.ok) {
+        const run = await runRes.json() as {
+          model_confidence?: ModelConfidence
+          pattern_evidence?: PatternEvidence
+          playbook?: Playbook
+          optimal_specs?: OptimalSpecs
+        } | null
+        if (run) {
+          if (run.model_confidence) setModelConfidence(run.model_confidence)
+          if (run.pattern_evidence) setPatternEvidence(run.pattern_evidence)
+          if (run.playbook) setPlaybook(run.playbook)
+          if (run.optimal_specs) setOptimalSpecs(run.optimal_specs)
+        }
+      }
+    } catch { /* non-critical */ }
+    finally { setLoading(false) }
   }
 
-  async function handleGenerate() {
-    if (!topic.trim()) return
+  async function generateIdeas() {
     setLoading(true)
     setError(null)
-    setSimulations([])
-    setModelConfidence(null)
-    setPatternEvidence(null)
-    setPlaybook(null)
-    setOptimalSpecs(null)
     try {
       const res = await fetch('/api/simulate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ platform, format, topic }),
+        body: JSON.stringify({ auto: true }),
       })
       const data = await res.json() as {
         error?: string
@@ -169,34 +174,35 @@ export default function SimulatorPage() {
         playbook?: Playbook
         optimal_specs?: OptimalSpecs
       }
-      if (!res.ok) throw new Error(data.error ?? 'Generation failed')
-      const saved = data.simulations ?? []
-      setSimulations(saved)
-      setHistory((prev) => [...saved, ...prev])
+      if (!res.ok) {
+        console.error('API error:', data.error)
+        throw new Error(data.error ?? 'Generation failed')
+      }
+      if (data.simulations) setSimulations(data.simulations)
       if (data.model_confidence) setModelConfidence(data.model_confidence)
       if (data.pattern_evidence) setPatternEvidence(data.pattern_evidence)
       if (data.playbook) setPlaybook(data.playbook)
       if (data.optimal_specs) setOptimalSpecs(data.optimal_specs)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Generation failed')
+      const errorMsg = err instanceof Error ? err.message : 'Generation failed'
+      console.error('Generation error:', errorMsg, err)
+      setError(errorMsg)
     } finally {
       setLoading(false)
     }
   }
 
-  async function handlePublishedToggle(id: string, published: boolean) {
+  async function handleSignalChange(id: string, signal: string) {
     try {
       await fetch(`/api/simulations/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ published }),
+        body: JSON.stringify({ signal }),
       })
-      setSimulations((prev) => prev.map((s) => (s.id === id ? { ...s, published } : s)))
-      setHistory((prev) => prev.map((s) => (s.id === id ? { ...s, published } : s)))
+      setSimulations((prev) => prev.map((s) => (s.id === id ? { ...s, signal } : s)))
     } catch { /* non-critical */ }
   }
 
-  const hasAnalysis = simulations.length > 0
   const today = new Date().toISOString().slice(0, 10)
 
   return (
@@ -215,55 +221,12 @@ export default function SimulatorPage() {
               : 'No post data yet — run a scrape first'}
           </p>
         </div>
-        <span className="shrink-0 text-xs text-gray-600">{today}</span>
-      </div>
-
-      {/* ── Generator ──────────────────────────────────────────── */}
-      <div className="rounded-xl border border-white/5 bg-[#111218] p-5 space-y-4">
-        <p className="text-xs font-semibold uppercase tracking-widest text-gray-600">Generate Ideas</p>
-        <div className="grid gap-4 sm:grid-cols-3">
-          <div>
-            <label className="mb-1.5 block text-xs font-medium text-gray-500">Platform</label>
-            <select
-              value={platform}
-              onChange={(e) => setPlatform(e.target.value as Platform)}
-              className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none transition focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30"
-            >
-              {PLATFORMS.map((p) => (
-                <option key={p} value={p} className="bg-[#111218]">{PLATFORM_LABELS[p]}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="mb-1.5 block text-xs font-medium text-gray-500">Format</label>
-            <select
-              value={format}
-              onChange={(e) => setFormat(e.target.value)}
-              className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none transition focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30"
-            >
-              {FORMAT_OPTIONS[platform].map((f) => (
-                <option key={f} value={f} className="bg-[#111218]">{f}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="mb-1.5 block text-xs font-medium text-gray-500">Topic</label>
-            <input
-              type="text"
-              value={topic}
-              onChange={(e) => setTopic(e.target.value)}
-              placeholder="e.g. morning routine, productivity"
-              onKeyDown={(e) => e.key === 'Enter' && void handleGenerate()}
-              className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder-gray-600 outline-none transition focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30"
-            />
-          </div>
-        </div>
         <button
-          onClick={() => void handleGenerate()}
-          disabled={loading || !topic.trim()}
-          className="w-full rounded-lg bg-gradient-to-r from-cyan-500 to-blue-500 py-2.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
+          onClick={() => void generateIdeas()}
+          disabled={loading}
+          className="shrink-0 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-xs font-semibold text-cyan-400 transition hover:bg-cyan-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          {loading ? 'Analyzing…' : 'Run Simulation'}
+          {loading ? 'Generating…' : '↻ Rerun Simulation'}
         </button>
       </div>
 
@@ -273,205 +236,202 @@ export default function SimulatorPage() {
         </div>
       )}
 
-      {/* ── Analysis (post-generation) ──────────────────────────── */}
-      {hasAnalysis && (
-        <>
-          {/* Model Confidence */}
-          {modelConfidence && (
-            <div className="rounded-xl border border-white/5 bg-[#111218] p-5">
-              <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-gray-600">
-                Model Confidence
-              </p>
-              <div className="grid grid-cols-3 divide-x divide-white/5">
-                {([
-                  { key: 'viral_formula_match', label: 'Viral Formula Match', color: 'text-emerald-400' },
-                  { key: 'prediction_accuracy',  label: 'Prediction Accuracy', color: 'text-yellow-400' },
-                  { key: 'flop_risk',            label: 'Flop Risk on Generic AI', color: 'text-red-400' },
-                ] as const).map(({ key, label, color }) => {
-                  const metric = modelConfidence[key]
-                  return (
-                    <div key={key} className="px-5 first:pl-0 last:pr-0 space-y-1">
-                      <p className={`text-4xl font-black ${color}`}>{metric.value}%</p>
-                      <p className="text-sm font-semibold text-white">{label}</p>
-                      <p className="text-xs text-gray-500 leading-relaxed">{metric.sublabel}</p>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Simulated Ideas — Ranked */}
-          <div className="rounded-xl border border-white/5 bg-[#111218] overflow-hidden">
-            <div className="px-5 py-4 border-b border-white/5">
-              <p className="text-xs font-semibold uppercase tracking-widest text-gray-600">
-                Simulated Ideas — Ranked
-              </p>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-white/5">
-                    <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-600 w-8">#</th>
-                    <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-600">Content Idea</th>
-                    <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-600">Views</th>
-                    <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-600">Eng</th>
-                    <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-600">Followers</th>
-                    <th className="px-4 py-2.5 text-center text-xs font-medium text-gray-600">Signal</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/5">
-                  {simulations.map((sim, idx) => (
-                    <tr key={sim.id} className="hover:bg-white/[0.02] transition">
-                      <td className="px-4 py-3 text-xs font-bold text-gray-600">
-                        {String(idx + 1).padStart(2, '0')}
-                      </td>
-                      <td className="px-4 py-3">
-                        <p className="text-sm font-medium text-white leading-snug">{sim.hook}</p>
-                        <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                          {sim.content_type && <Badge text={sim.content_type} />}
-                          {sim.estimated_time && (
-                            <span className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-xs text-gray-400">
-                              {sim.estimated_time}
-                            </span>
-                          )}
-                          <span className={`rounded border px-1.5 py-0.5 text-xs font-medium ${
-                            sim.is_proven
-                              ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400'
-                              : 'border-white/10 bg-white/5 text-gray-500'
-                          }`}>
-                            {sim.is_proven ? 'Proven' : 'No CC'}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-right text-xs font-medium text-white tabular-nums">
-                        {fmtViews(sim.views_low, sim.views_high)}
-                      </td>
-                      <td className="px-4 py-3 text-right text-xs text-gray-400 tabular-nums">
-                        {fmtEng(sim.eng_low, sim.eng_high)}
-                      </td>
-                      <td className="px-4 py-3 text-right text-xs text-gray-400 tabular-nums">
-                        {fmtFollowers(sim.followers_low, sim.followers_high)}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <span className={`rounded border px-2.5 py-1 text-xs font-bold ${SIGNAL_STYLES[sim.signal] ?? SIGNAL_STYLES.TEST}`}>
-                          {sim.signal || 'TEST'}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+      {/* ── Model Confidence (Top) ────────────────────────────── */}
+      {!loading && modelConfidence && (
+        <div className="rounded-xl border border-white/5 bg-[#111218] p-5">
+          <div className="grid grid-cols-3 divide-x divide-white/5">
+            {([
+              { key: 'viral_formula_match', label: 'Viral Formula Match', color: 'text-emerald-400' },
+              { key: 'prediction_accuracy',  label: 'Prediction Accuracy', color: 'text-yellow-400' },
+              { key: 'flop_risk',            label: 'Flop Risk on Generic AI', color: 'text-red-400' },
+            ] as const).map(({ key, label, color }) => {
+              const metric = modelConfidence[key]
+              return (
+                <div key={key} className="px-5 first:pl-0 last:pr-0 space-y-1 text-center">
+                  <p className={`text-4xl font-black ${color}`}>{metric.value}%</p>
+                  <p className="text-sm font-semibold text-white">{label}</p>
+                  <p className="text-xs text-gray-500 leading-relaxed">{metric.sublabel}</p>
+                </div>
+              )
+            })}
           </div>
-
-          {/* Pattern Evidence */}
-          {patternEvidence && (
-            <div className="rounded-xl border border-white/5 bg-[#111218] p-5">
-              <p className="mb-5 text-xs font-semibold uppercase tracking-widest text-gray-600">
-                Pattern Evidence
-              </p>
-              <div className="grid gap-6 sm:grid-cols-3">
-                <PatternBars rows={patternEvidence.format}   title="Format → Avg Views" />
-                <PatternBars rows={patternEvidence.duration} title="Duration → Avg Views" />
-                <PatternBars rows={patternEvidence.topic}    title="Topic → Avg Views" />
-              </div>
-            </div>
-          )}
-
-          {/* The Playbook */}
-          {playbook && (
-            <div className="rounded-xl border border-white/5 bg-[#111218] p-5">
-              <p className="mb-5 text-xs font-semibold uppercase tracking-widest text-gray-600">
-                The Playbook
-              </p>
-              <div className="grid gap-6 sm:grid-cols-2">
-                <div className="space-y-3">
-                  <p className="flex items-center gap-1.5 text-sm font-semibold text-emerald-400">
-                    <span className="flex h-4 w-4 items-center justify-center rounded bg-emerald-500/10 text-xs">+</span>
-                    Always
-                  </p>
-                  <ul className="space-y-2.5">
-                    {playbook.always.map((item, i) => (
-                      <li key={i} className="flex gap-2 text-xs text-gray-400 leading-relaxed">
-                        <span className="mt-0.5 shrink-0 text-emerald-500">•</span>
-                        <span>
-                          <span className="font-semibold text-white">{item.label}</span>
-                          {item.detail ? ` — ${item.detail}` : ''}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-                <div className="space-y-3">
-                  <p className="flex items-center gap-1.5 text-sm font-semibold text-red-400">
-                    <span className="flex h-4 w-4 items-center justify-center rounded bg-red-500/10 text-xs">−</span>
-                    Never
-                  </p>
-                  <ul className="space-y-2.5">
-                    {playbook.never.map((item, i) => (
-                      <li key={i} className="flex gap-2 text-xs text-gray-400 leading-relaxed">
-                        <span className="mt-0.5 shrink-0 text-red-500">•</span>
-                        <span>
-                          <span className="font-semibold text-white">{item.label}</span>
-                          {item.detail ? ` — ${item.detail}` : ''}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Optimal Specs */}
-          {optimalSpecs && (
-            <div className="rounded-xl border border-white/5 bg-[#111218] p-5">
-              <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-gray-600">
-                Optimal Specs
-              </p>
-              <div className="flex flex-wrap gap-4">
-                <div className="rounded-lg border border-white/5 bg-white/[0.02] px-5 py-3 text-center">
-                  <p className="text-2xl font-black text-cyan-400">{optimalSpecs.duration}</p>
-                  <p className="mt-0.5 text-xs text-gray-500 uppercase tracking-widest">Duration</p>
-                </div>
-                {optimalSpecs.items != null && (
-                  <div className="rounded-lg border border-white/5 bg-white/[0.02] px-5 py-3 text-center">
-                    <p className="text-2xl font-black text-cyan-400">{optimalSpecs.items}</p>
-                    <p className="mt-0.5 text-xs text-gray-500 uppercase tracking-widest">Items</p>
-                  </div>
-                )}
-                {optimalSpecs.extras?.map((spec) => (
-                  <div key={spec.label} className="rounded-lg border border-white/5 bg-white/[0.02] px-5 py-3 text-center">
-                    <p className="text-lg font-bold text-white">{spec.value}</p>
-                    <p className="mt-0.5 text-xs text-gray-500 uppercase tracking-widest">{spec.label}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </>
+        </div>
       )}
 
-      {/* ── History ────────────────────────────────────────────── */}
-      <section>
-        <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-gray-600">History</p>
-        {loadingHistory ? (
-          <div className="py-8 text-center text-sm text-gray-600">Loading…</div>
-        ) : history.filter((s) => !simulations.find((n) => n.id === s.id)).length === 0 ? (
-          <div className="rounded-xl border border-dashed border-white/5 py-12 text-center">
-            <p className="text-sm text-gray-500">No simulations yet. Run a simulation above.</p>
+      {/* ── Loading State ──────────────────────────────────────── */}
+      {loading && (
+        <div className="rounded-xl border border-white/5 bg-[#111218] p-8 text-center">
+          <div className="inline-block">
+            <div className="h-8 w-8 animate-spin rounded-full border 2 border-cyan-500 border-t-transparent" />
           </div>
-        ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {history
-              .filter((s) => !simulations.find((n) => n.id === s.id))
-              .map((sim) => (
-                <SimulationCard key={sim.id} simulation={sim} onPublishedToggle={handlePublishedToggle} />
-              ))}
+          <p className="mt-3 text-sm text-gray-400">Generating ideas based on your content…</p>
+        </div>
+      )}
+
+      {/* ── Simulated Ideas — Ranked ──────────────────────────── */}
+      {!loading && simulations.length > 0 && (
+        <div className="rounded-xl border border-white/5 bg-[#111218] overflow-hidden">
+          <div className="px-5 py-4 border-b border-white/5">
+            <p className="text-xs font-semibold uppercase tracking-widest text-gray-600">
+              Simulated Ideas — Ranked
+            </p>
           </div>
-        )}
-      </section>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-white/5">
+                  <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-600 w-8">#</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-600">Content Idea</th>
+                  <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-600">Views</th>
+                  <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-600">Eng</th>
+                  <th className="px-4 py-2.5 text-right text-xs font-medium text-gray-600">Followers</th>
+                  <th className="px-4 py-2.5 text-center text-xs font-medium text-gray-600">Signal</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {simulations.map((sim, idx) => (
+                  <tr key={sim.id} className="hover:bg-white/[0.02] transition">
+                    <td className="px-4 py-3 text-xs font-bold text-gray-600">
+                      {String(idx + 1).padStart(2, '0')}
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="text-sm font-medium text-white leading-snug">{sim.hook}</p>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                        {sim.content_type && <Badge text={sim.content_type} />}
+                        {sim.estimated_time && (
+                          <span className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-xs text-gray-400">
+                            {sim.estimated_time}
+                          </span>
+                        )}
+                        <span className={`rounded border px-1.5 py-0.5 text-xs font-medium ${
+                          sim.is_proven
+                            ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400'
+                            : 'border-white/10 bg-white/5 text-gray-500'
+                        }`}>
+                          {sim.is_proven ? 'Proven' : 'No CC'}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-right text-xs font-medium text-white tabular-nums">
+                      {fmtViews(sim.views_low, sim.views_high)}
+                    </td>
+                    <td className="px-4 py-3 text-right text-xs text-gray-400 tabular-nums">
+                      {fmtEng(sim.eng_low, sim.eng_high)}
+                    </td>
+                    <td className="px-4 py-3 text-right text-xs text-gray-400 tabular-nums">
+                      {fmtFollowers(sim.followers_low, sim.followers_high)}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <select
+                        value={sim.signal || 'TEST'}
+                        onChange={(e) => void handleSignalChange(sim.id, e.target.value)}
+                        className={`rounded border px-2.5 py-1 text-xs font-bold outline-none transition cursor-pointer ${SIGNAL_STYLES[sim.signal || 'TEST'] ?? SIGNAL_STYLES.TEST}`}
+                      >
+                        <option value="POST" className="bg-[#111218]">POST</option>
+                        <option value="TEST" className="bg-[#111218]">TEST</option>
+                        <option value="SKIP" className="bg-[#111218]">SKIP</option>
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── Pattern Evidence ──────────────────────────────────── */}
+      {!loading && patternEvidence && (
+        <div className="rounded-xl border border-white/5 bg-[#111218] p-5">
+          <p className="mb-5 text-xs font-semibold uppercase tracking-widest text-gray-600">
+            Pattern Evidence
+          </p>
+          <div className="grid gap-6 sm:grid-cols-3">
+            <PatternBars rows={patternEvidence.format}   title="Format → Avg Views" />
+            <PatternBars rows={patternEvidence.duration} title="Duration → Avg Views" />
+            <PatternBars rows={patternEvidence.topic}    title="Topic → Avg Views" />
+          </div>
+        </div>
+      )}
+
+      {/* ── The Playbook ──────────────────────────────────────── */}
+      {!loading && playbook && (
+        <div className="rounded-xl border border-white/5 bg-[#111218] p-5">
+          <p className="mb-5 text-xs font-semibold uppercase tracking-widest text-gray-600">
+            The Playbook
+          </p>
+          <div className="grid gap-6 sm:grid-cols-2">
+            <div className="space-y-3">
+              <p className="flex items-center gap-1.5 text-sm font-semibold text-emerald-400">
+                <span className="flex h-4 w-4 items-center justify-center rounded bg-emerald-500/10 text-xs">+</span>
+                Always
+              </p>
+              <ul className="space-y-2.5">
+                {playbook.always.map((item, i) => (
+                  <li key={i} className="flex gap-2 text-xs text-gray-400 leading-relaxed">
+                    <span className="mt-0.5 shrink-0 text-emerald-500">•</span>
+                    <span>
+                      <span className="font-semibold text-white">{item.label}</span>
+                      {item.detail ? ` — ${item.detail}` : ''}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="space-y-3">
+              <p className="flex items-center gap-1.5 text-sm font-semibold text-red-400">
+                <span className="flex h-4 w-4 items-center justify-center rounded bg-red-500/10 text-xs">−</span>
+                Never
+              </p>
+              <ul className="space-y-2.5">
+                {playbook.never.map((item, i) => (
+                  <li key={i} className="flex gap-2 text-xs text-gray-400 leading-relaxed">
+                    <span className="mt-0.5 shrink-0 text-red-500">•</span>
+                    <span>
+                      <span className="font-semibold text-white">{item.label}</span>
+                      {item.detail ? ` — ${item.detail}` : ''}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Optimal Specs ─────────────────────────────────────── */}
+      {!loading && optimalSpecs && (
+        <div className="rounded-xl border border-white/5 bg-[#111218] p-5">
+          <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-gray-600">
+            Optimal Specs
+          </p>
+          <div className="flex flex-wrap gap-4">
+            <div className="rounded-lg border border-white/5 bg-white/[0.02] px-5 py-3 text-center">
+              <p className="text-2xl font-black text-cyan-400">{optimalSpecs.duration}</p>
+              <p className="mt-0.5 text-xs text-gray-500 uppercase tracking-widest">Duration</p>
+            </div>
+            {optimalSpecs.items != null && (
+              <div className="rounded-lg border border-white/5 bg-white/[0.02] px-5 py-3 text-center">
+                <p className="text-2xl font-black text-cyan-400">{optimalSpecs.items}</p>
+                <p className="mt-0.5 text-xs text-gray-500 uppercase tracking-widest">Items</p>
+              </div>
+            )}
+            {optimalSpecs.extras?.map((spec) => (
+              <div key={spec.label} className="rounded-lg border border-white/5 bg-white/[0.02] px-5 py-3 text-center">
+                <p className="text-lg font-bold text-white">{spec.value}</p>
+                <p className="mt-0.5 text-xs text-gray-500 uppercase tracking-widest">{spec.label}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Empty State ────────────────────────────────────────── */}
+      {!loading && simulations.length === 0 && !error && (
+        <div className="rounded-xl border border-dashed border-white/5 py-12 text-center">
+          <p className="text-sm text-gray-500">No simulations generated yet. Check back soon.</p>
+        </div>
+      )}
     </div>
   )
 }
