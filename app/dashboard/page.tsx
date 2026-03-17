@@ -352,7 +352,7 @@ export default function DashboardPage() {
                             ? 'text-yellow-400'
                             : 'text-gray-400'
                       }`}>
-                        {stat.totalViews === 0 ? <span className="text-gray-600 text-xs">No views data</span> : `${stat.avgEngRate.toFixed(2)}%`}
+                        {stat.avgEngRate.toFixed(2)}%
                       </td>
                     </tr>
                   ))}

@@ -131,7 +131,8 @@ function normalizePost(
         comments: Number(item.commentsCount ?? item.commentCount ?? 0),
         shares: 0,
         reach: Number(item.viewCount ?? item.views ?? 0),
-        posted_at: String(item.publishedAt ?? item.uploadDate ?? item.date ?? item.upload_date ?? item.publishDate ?? new Date().toISOString()),
+        // Actual field from streamers/youtube-scraper is `date`
+        posted_at: String(item.date ?? item.publishedAt ?? item.uploadDate ?? item.upload_date ?? new Date().toISOString()),
       }
 
     case 'facebook':
@@ -196,6 +197,7 @@ function normalizeProfile(platform: string, item: Record<string, unknown>): Prof
     }
     case 'youtube':
       return {
+        // streamers/youtube-scraper returns numberOfSubscribers and channelTotalVideos
         followers: Number(item.numberOfSubscribers ?? item.subscriberCount ?? item.subscribers ?? 0),
         following: 0,
         posts_count: Number(item.channelTotalVideos ?? item.videoCount ?? 0),
@@ -209,12 +211,11 @@ function normalizeProfile(platform: string, item: Record<string, unknown>): Prof
       return { followers, following: 0, posts_count: 0 }
     }
     case 'facebook':
+      // apify/facebook-pages-scraper returns followers and likes as page-level counts
       return {
-        followers: Number(
-          item.followers ?? item.followersCount ?? item.likes ?? item.pageLikes ?? 0,
-        ),
+        followers: Number(item.followers ?? item.followersCount ?? item.likes ?? 0),
         following: 0,
-        posts_count: Number(item.posts ?? item.postsCount ?? 0),
+        posts_count: 0,
       }
     default:
       return { followers: 0, following: 0, posts_count: 0 }
@@ -286,7 +287,10 @@ function buildActorInput(platform: string, handle: string): Record<string, unkno
         resultsType: 'reels',
         resultsLimit: 200,
       }
-    case 'tiktok':
+    case 'tiktok': {
+      // oldestVideoDate prevents the actor's internal date filter from cutting results short.
+      // Our scrapeAndStore cutoffDate handles date filtering on our end.
+      const threeYearsAgo = new Date(Date.now() - 3 * 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
       return {
         profiles: [username],
         resultsPerPage: 500,
@@ -296,7 +300,9 @@ function buildActorInput(platform: string, handle: string): Record<string, unkno
         shouldDownloadCovers: false,
         shouldDownloadAvatars: false,
         shouldDownloadMusicCovers: false,
+        oldestVideoDate: threeYearsAgo,
       }
+    }
     case 'twitter':
       return {
         twitterHandles: [username],
@@ -310,7 +316,7 @@ function buildActorInput(platform: string, handle: string): Record<string, unkno
       const linkedinUrl = handle.startsWith('http')
         ? handle
         : handle.includes('/in/')
-          ? `https://www.linkedin.com${handle.startsWith('/') ? '' : '/'}${handle}`
+          ? `https://www.linkedin.com/in/${handle.replace('@', '')}/`
           : `https://www.linkedin.com/company/${handle.replace('@', '')}/`
       return {
         targetUrls: [linkedinUrl],
@@ -366,7 +372,8 @@ export async function fetchAndStoreProfile(
 
   try {
     const client = getClient(apifyToken)
-    const actorId = PROFILE_ACTOR_MAP[p] ?? (p === 'linkedin' ? getLinkedInActorId(handle) : ACTOR_MAP[p])
+    const actorId =
+      PROFILE_ACTOR_MAP[p] ?? (p === 'linkedin' ? getLinkedInActorId(handle) : ACTOR_MAP[p])
     const input = buildProfileInput(p, handle)
 
     const run = await client.actor(actorId).call(input)
