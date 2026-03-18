@@ -6,10 +6,11 @@ import { AuditResult } from './AuditResult'
 import type { Audit } from '@/types'
 import { PLATFORMS, PLATFORM_LABELS, type Platform } from '@/types'
 
-export function AuditPanel({ timePeriod = '1m', onScrapeComplete }: { timePeriod?: '1w' | '1m' | '3m' | '6m'; onScrapeComplete?: () => void }) {
+export function AuditPanel({ onScrapeComplete }: { onScrapeComplete?: () => void }) {
   const [open, setOpen] = useState(false)
   const [platform, setPlatform] = useState<Platform>('instagram')
   const [handle, setHandle] = useState('')
+  const [scrapePeriod, setScrapePeriod] = useState<'1w' | '1m' | '3m' | '6m'>('1m')
   const [loadingScrape, setLoadingScrape] = useState(false)
   const [loadingAudit, setLoadingAudit] = useState(false)
   const [latestAudit, setLatestAudit] = useState<Audit | null>(null)
@@ -23,7 +24,7 @@ export function AuditPanel({ timePeriod = '1m', onScrapeComplete }: { timePeriod
       const res = await fetch('/api/scrape', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ platform, handle, timePeriod }),
+        body: JSON.stringify({ platform, handle, timePeriod: scrapePeriod }),
       })
       const data = await res.json() as { error?: string; inserted?: number; skipped?: number }
       if (!res.ok) throw new Error(data.error ?? 'Scrape failed')
@@ -93,6 +94,29 @@ export function AuditPanel({ timePeriod = '1m', onScrapeComplete }: { timePeriod
                 {PLATFORM_LABELS[p]}
               </button>
             ))}
+          </div>
+
+          {/* Scrape time range */}
+          <div>
+            <p className="mb-2 text-xs font-medium text-gray-500">Scrape time range</p>
+            <div className="flex gap-1.5">
+              {(['1w', '1m', '3m', '6m'] as const).map((period) => {
+                const labels = { '1w': '1 Week', '1m': '1 Month', '3m': '3 Months', '6m': '6 Months' }
+                return (
+                  <button
+                    key={period}
+                    onClick={() => setScrapePeriod(period)}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                      scrapePeriod === period
+                        ? 'bg-cyan-500 text-white'
+                        : 'border border-white/10 bg-white/5 text-gray-400 hover:border-white/20 hover:bg-white/10'
+                    }`}
+                  >
+                    {labels[period]}
+                  </button>
+                )
+              })}
+            </div>
           </div>
 
           {/* Scrape row */}

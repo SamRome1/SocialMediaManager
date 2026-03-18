@@ -20,12 +20,13 @@ export async function POST(request: NextRequest) {
     const cutoffDate = new Date(now.getTime() - daysBack * 24 * 60 * 60 * 1000).toISOString()
 
     // Fetch data within time period
-    const [postStatsRes, topPostsRes, profilesRes, settingsRes] = await Promise.all([
+    const [rawPostsRes, topPostsRes, profilesRes, settingsRes] = await Promise.all([
       supabaseAdmin
         .from('posts')
-        .select('platform, likes, comments, shares, reach')
+        .select('platform, posted_at, likes, comments, shares, reach')
         .gte('posted_at', cutoffDate)
-        .limit(1000),
+        .order('posted_at', { ascending: true })
+        .limit(2000),
       supabaseAdmin
         .from('posts')
         .select('id, platform, content, likes, comments, shares, reach, posted_at, format')
@@ -47,7 +48,7 @@ export async function POST(request: NextRequest) {
     if (profilesRes.error) console.error('[dashboard] profiles error:', profilesRes.error)
 
     return NextResponse.json({
-      postStats: postStatsRes.data ?? [],
+      rawPosts: rawPostsRes.data ?? [],
       topPosts: (topPostsRes.data ?? []) as Post[],
       profiles: (profilesRes.data ?? []) as Profile[],
       settings: settingsRes.data,

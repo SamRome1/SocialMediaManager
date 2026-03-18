@@ -157,6 +157,22 @@ export interface PlatformStat {
   avgEngRate: number
 }
 
+export interface MediaAnalysis {
+  overall_score: number
+  hook_strength: number
+  visual_quality: number
+  platform_fit: number
+  predicted_views_low: number
+  predicted_views_high: number
+  predicted_engagement_low: number
+  predicted_engagement_high: number
+  summary: string
+  strengths: string[]
+  improvements: { issue: string; fix: string }[]
+  reframe_suggestions: string[]
+  caption_suggestions: string[]
+}
+
 export type Platform = 'instagram' | 'tiktok' | 'twitter' | 'linkedin' | 'youtube' | 'facebook'
 
 export const PLATFORMS: Platform[] = ['instagram', 'tiktok', 'twitter', 'linkedin', 'youtube', 'facebook']
