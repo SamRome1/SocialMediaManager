@@ -6,6 +6,15 @@ import { AuditResult } from './AuditResult'
 import type { Audit } from '@/types'
 import { PLATFORMS, PLATFORM_LABELS, type Platform } from '@/types'
 
+type RefreshResult = {
+  platform: string
+  handle: string
+  inserted: number
+  skipped: number
+  errors: number
+  error?: string
+}
+
 export function AuditPanel({ onScrapeComplete }: { onScrapeComplete?: () => void }) {
   const [open, setOpen] = useState(false)
   const [platform, setPlatform] = useState<Platform>('instagram')
@@ -13,8 +22,28 @@ export function AuditPanel({ onScrapeComplete }: { onScrapeComplete?: () => void
   const [scrapePeriod, setScrapePeriod] = useState<'1w' | '1m' | '3m' | '6m'>('1m')
   const [loadingScrape, setLoadingScrape] = useState(false)
   const [loadingAudit, setLoadingAudit] = useState(false)
+  const [loadingRefreshAll, setLoadingRefreshAll] = useState(false)
+  const [refreshResults, setRefreshResults] = useState<RefreshResult[] | null>(null)
   const [latestAudit, setLatestAudit] = useState<Audit | null>(null)
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+
+  async function handleRefreshAll() {
+    setLoadingRefreshAll(true)
+    setMsg(null)
+    setRefreshResults(null)
+    try {
+      const res = await fetch('/api/scrape-all', { method: 'POST' })
+      const data = await res.json() as { error?: string; results?: RefreshResult[]; totalInserted?: number }
+      if (!res.ok) throw new Error(data.error ?? 'Refresh failed')
+      setRefreshResults(data.results ?? [])
+      setMsg({ type: 'success', text: `Refresh complete — ${data.totalInserted ?? 0} new posts imported` })
+      onScrapeComplete?.()
+    } catch (err) {
+      setMsg({ type: 'error', text: err instanceof Error ? err.message : 'Refresh failed' })
+    } finally {
+      setLoadingRefreshAll(false)
+    }
+  }
 
   async function handleScrape() {
     if (!handle.trim()) return
@@ -61,21 +90,36 @@ export function AuditPanel({ onScrapeComplete }: { onScrapeComplete?: () => void
   return (
     <div className="rounded-xl border border-white/5 bg-[#111218]">
       {/* Toggle header */}
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center justify-between px-5 py-4 text-left"
-      >
-        <div className="flex items-center gap-3">
+      <div className="flex w-full items-center justify-between px-5 py-4">
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className="flex flex-1 items-center gap-3 text-left"
+        >
           <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-500 to-blue-500 text-xs font-bold text-white">
             ✦
           </span>
           <span className="text-sm font-semibold text-white">Scrape & Audit</span>
           <span className="text-xs text-gray-600">Import posts + run AI analysis</span>
-        </div>
-        <span className="text-gray-600 transition-transform" style={{ transform: open ? 'rotate(180deg)' : undefined }}>
-          ▾
-        </span>
-      </button>
+          <span className="text-gray-600 transition-transform" style={{ transform: open ? 'rotate(180deg)' : undefined }}>
+            ▾
+          </span>
+        </button>
+        <button
+          onClick={(e) => { e.stopPropagation(); void handleRefreshAll() }}
+          disabled={loadingRefreshAll || loadingScrape}
+          className="flex shrink-0 items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-gray-300 transition hover:bg-white/10 hover:text-white disabled:opacity-40"
+          title="Re-scrape all previously imported accounts (last 3 months)"
+        >
+          {loadingRefreshAll ? (
+            <>
+              <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-gray-400 border-t-transparent" />
+              Refreshing…
+            </>
+          ) : (
+            <>↻ Refresh All</>
+          )}
+        </button>
+      </div>
 
       {open && (
         <div className="space-y-5 border-t border-white/5 px-5 pb-5 pt-4">
@@ -160,6 +204,32 @@ export function AuditPanel({ onScrapeComplete }: { onScrapeComplete?: () => void
                 : 'border-red-500/20 bg-red-500/10 text-red-400'
             }`}>
               {msg.text}
+            </div>
+          )}
+
+          {/* Refresh All results */}
+          {refreshResults && refreshResults.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-xs font-semibold uppercase tracking-widest text-gray-600">Refresh Results</p>
+              {refreshResults.map((r) => (
+                <div
+                  key={`${r.platform}-${r.handle}`}
+                  className="flex items-center justify-between gap-3 rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <PlatformBadge platform={r.platform as Platform} size="sm" />
+                    <span className="truncate text-xs text-gray-400">{r.handle}</span>
+                  </div>
+                  {r.error ? (
+                    <span className="shrink-0 text-xs text-red-400">{r.error}</span>
+                  ) : (
+                    <div className="flex shrink-0 items-center gap-3 text-xs text-gray-500">
+                      <span className="text-emerald-400 font-semibold">+{r.inserted} new</span>
+                      <span>{r.skipped} skipped</span>
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
           )}
 
