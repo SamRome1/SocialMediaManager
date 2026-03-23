@@ -1,51 +1,45 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
+import { createSupabaseServerClient } from '@/lib/supabase/server'
 import type { Post, Profile } from '@/types'
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json() as {
-      timePeriod?: '1w' | '1m' | '3m' | '6m'
-    }
+    const supabase = await createSupabaseServerClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+    const body = await request.json() as { timePeriod?: '1w' | '1m' | '3m' | '6m' }
     const { timePeriod = '1m' } = body
 
-    // Calculate date range
-    const now = new Date()
-    let daysBack = 30 // default 1 month
-    if (timePeriod === '1w') daysBack = 7
-    else if (timePeriod === '1m') daysBack = 30
-    else if (timePeriod === '3m') daysBack = 90
-    else if (timePeriod === '6m') daysBack = 180
+    const daysBack = { '1w': 7, '1m': 30, '3m': 90, '6m': 180 }[timePeriod]
+    const cutoffDate = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString()
 
-    const cutoffDate = new Date(now.getTime() - daysBack * 24 * 60 * 60 * 1000).toISOString()
-
-    // Fetch data within time period
     const [rawPostsRes, topPostsRes, profilesRes, settingsRes] = await Promise.all([
-      supabaseAdmin
+      supabase
         .from('posts')
         .select('platform, posted_at, likes, comments, shares, reach')
+        .eq('user_id', user.id)
         .gte('posted_at', cutoffDate)
         .order('posted_at', { ascending: true })
         .limit(2000),
-      supabaseAdmin
+      supabase
         .from('posts')
         .select('id, platform, content, likes, comments, shares, reach, posted_at, format')
+        .eq('user_id', user.id)
         .gte('posted_at', cutoffDate)
         .order('reach', { ascending: false })
         .limit(3),
-      supabaseAdmin
+      supabase
         .from('profiles')
         .select('*')
+        .eq('user_id', user.id)
         .order('scraped_at', { ascending: false }),
-      supabaseAdmin
+      supabase
         .from('settings')
         .select('brand_name, niche, platforms')
-        .limit(1)
+        .eq('user_id', user.id)
         .single(),
     ])
-
-    console.log('[dashboard] profiles found:', profilesRes.data?.length ?? 0, profilesRes.data?.map(p => `${p.platform}/${p.handle}:${p.followers}`))
-    if (profilesRes.error) console.error('[dashboard] profiles error:', profilesRes.error)
 
     return NextResponse.json({
       rawPosts: rawPostsRes.data ?? [],
@@ -55,7 +49,7 @@ export async function POST(request: NextRequest) {
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
-    console.error('[dashboard] error:', message, err)
+    console.error('[dashboard] error:', message)
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }

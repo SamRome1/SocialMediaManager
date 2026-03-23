@@ -364,6 +364,7 @@ function buildActorInput(platform: string, handle: string): Record<string, unkno
 export async function fetchAndStoreProfile(
   platform: string,
   handle: string,
+  userId: string,
   apifyToken?: string,
 ): Promise<ProfileData | null> {
   const p = platform.toLowerCase()
@@ -402,12 +403,14 @@ export async function fetchAndStoreProfile(
     const { data: existing } = await supabaseAdmin
       .from('profiles')
       .select('followers')
+      .eq('user_id', userId)
       .eq('platform', p)
       .eq('handle', username)
       .single()
 
     const { error: upsertError } = await supabaseAdmin.from('profiles').upsert(
       {
+        user_id: userId,
         platform: p,
         handle: username,
         followers: profileData.followers,
@@ -416,7 +419,7 @@ export async function fetchAndStoreProfile(
         posts_count: profileData.posts_count,
         scraped_at: new Date().toISOString(),
       },
-      { onConflict: 'platform,handle' },
+      { onConflict: 'user_id,platform,handle' },
     )
 
     if (upsertError) {
@@ -435,6 +438,7 @@ export async function fetchAndStoreProfile(
 export async function scrapeAndStore(
   platform: string,
   handle: string,
+  userId: string,
   apifyToken?: string,
   cutoffDate?: Date,
 ): Promise<{ inserted: number; skipped: number; errors: number }> {
@@ -479,13 +483,14 @@ export async function scrapeAndStore(
     }
   }
 
-  // Batch-check which source_ids already exist in the DB
+  // Batch-check which source_ids already exist in the DB for this user
   const sourceIds = posts.map((p) => p.source_id).filter((id): id is string => !!id)
   const existingIds = new Set<string>()
   if (sourceIds.length > 0) {
     const { data: existing } = await supabaseAdmin
       .from('posts')
       .select('source_id')
+      .eq('user_id', userId)
       .eq('platform', p)
       .in('source_id', sourceIds)
     for (const row of existing ?? []) {
@@ -502,7 +507,7 @@ export async function scrapeAndStore(
       skipped++
       continue
     }
-    const { error } = await supabaseAdmin.from('posts').insert(post)
+    const { error } = await supabaseAdmin.from('posts').insert({ ...post, user_id: userId })
     if (error) {
       console.error('Supabase insert error:', error)
       errors++

@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
+import { createSupabaseServerClient } from '@/lib/supabase/server'
 import type { Settings } from '@/types'
 
 export async function GET() {
   try {
-    const { data, error } = await supabaseAdmin
+    const supabase = await createSupabaseServerClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+    const { data, error } = await supabase
       .from('settings')
       .select('*')
-      .limit(1)
+      .eq('user_id', user.id)
       .single()
 
     if (error && error.code !== 'PGRST116') throw error // PGRST116 = no rows
@@ -21,46 +25,41 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json() as Partial<Omit<Settings, 'id' | 'updated_at'>>
+    const supabase = await createSupabaseServerClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    // Check if a settings row exists
-    const { data: existing } = await supabaseAdmin
+    const body = await request.json() as Partial<Omit<Settings, 'id' | 'updated_at' | 'user_id'>>
+
+    const { data: existing } = await supabase
       .from('settings')
       .select('id')
-      .limit(1)
+      .eq('user_id', user.id)
       .single()
 
     let result
-
     if (existing?.id) {
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await supabase
         .from('settings')
         .update({ ...body, updated_at: new Date().toISOString() })
         .eq('id', existing.id)
         .select()
         .single()
-      if (error) {
-        console.error('[settings POST update]', error)
-        return NextResponse.json({ error: error.message }, { status: 500 })
-      }
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
       result = data
     } else {
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await supabase
         .from('settings')
-        .insert({ ...body, updated_at: new Date().toISOString() })
+        .insert({ ...body, user_id: user.id, updated_at: new Date().toISOString() })
         .select()
         .single()
-      if (error) {
-        console.error('[settings POST insert]', error)
-        return NextResponse.json({ error: error.message }, { status: 500 })
-      }
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
       result = data
     }
 
     return NextResponse.json(result)
   } catch (err) {
-    const message = err instanceof Error ? err.message : JSON.stringify(err)
-    console.error('[settings POST]', err)
+    const message = err instanceof Error ? err.message : 'Unknown error'
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }

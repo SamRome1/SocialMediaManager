@@ -1,22 +1,22 @@
 import { NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
+import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { scrapeAndStore, fetchAndStoreProfile } from '@/lib/apify'
 
-// Allow up to 5 minutes for multi-platform scraping on Vercel Pro
 export const maxDuration = 300
 
 export async function POST() {
   try {
-    // Source of truth: every (platform, handle) that has ever been scraped
-    const { data: profiles, error: profilesError } = await supabaseAdmin
+    const supabase = await createSupabaseServerClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+    const { data: profiles, error: profilesError } = await supabase
       .from('profiles')
       .select('platform, handle')
+      .eq('user_id', user.id)
       .order('platform')
 
-    if (profilesError) {
-      return NextResponse.json({ error: profilesError.message }, { status: 500 })
-    }
-
+    if (profilesError) return NextResponse.json({ error: profilesError.message }, { status: 500 })
     if (!profiles?.length) {
       return NextResponse.json(
         { error: 'No previously scraped accounts found. Scrape at least one account first.' },
@@ -24,15 +24,13 @@ export async function POST() {
       )
     }
 
-    const { data: settings } = await supabaseAdmin
+    const { data: settings } = await supabase
       .from('settings')
       .select('apify_token')
-      .limit(1)
+      .eq('user_id', user.id)
       .single()
 
     const apifyToken = settings?.apify_token || undefined
-
-    // 3-month lookback
     const cutoffDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
 
     const results: Array<{
@@ -47,11 +45,10 @@ export async function POST() {
     for (const { platform, handle } of profiles) {
       try {
         const [postsResult] = await Promise.all([
-          scrapeAndStore(platform, handle, apifyToken, cutoffDate),
-          fetchAndStoreProfile(platform, handle, apifyToken),
+          scrapeAndStore(platform, handle, user.id, apifyToken, cutoffDate),
+          fetchAndStoreProfile(platform, handle, user.id, apifyToken),
         ])
         results.push({ platform, handle, ...postsResult })
-        console.log(`[scrape-all] ${platform} (${handle}): inserted ${postsResult.inserted}, skipped ${postsResult.skipped}`)
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error'
         console.error(`[scrape-all] ${platform} (${handle}) error:`, message)

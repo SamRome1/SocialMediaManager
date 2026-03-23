@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
+import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { runSimulation } from '@/lib/anthropic'
 import type { Post, Settings } from '@/types'
 
 export async function POST(request: NextRequest) {
   try {
-    console.log('[simulate] POST request received')
+    const supabase = await createSupabaseServerClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
     const body = await request.json() as {
       platform?: string
       format?: string
@@ -14,62 +17,45 @@ export async function POST(request: NextRequest) {
       timePeriod?: '1w' | '1m' | '3m' | '6m'
     }
     const { platform, format, topic, auto, timePeriod = '1m' } = body
-    console.log('[simulate] request body:', { platform, format, topic, auto, timePeriod })
 
-    console.log('[simulate] fetching settings...')
-    const { data: settings, error: settingsError } = await supabaseAdmin
+    const { data: settings, error: settingsError } = await supabase
       .from('settings')
       .select('brand_name, niche, tone')
-      .limit(1)
+      .eq('user_id', user.id)
       .single()
 
     if (settingsError || !settings) {
-      console.error('[simulate] settings error:', settingsError)
-      return NextResponse.json(
-        { error: 'Settings not configured. Please set up your brand in Settings.' },
-        { status: 404 },
-      )
+      return NextResponse.json({ error: 'Settings not configured. Please set up your brand in Settings.' }, { status: 404 })
     }
-    console.log('[simulate] settings found:', settings)
 
     let selectedPlatform = platform
     let selectedFormat = format
     let selectedTopic = topic
 
-    // Auto-derive any missing fields from recent posts
     const needsDerive = auto || !selectedPlatform || !selectedFormat || !selectedTopic
     if (needsDerive) {
-      const now = new Date()
-      let daysBack = 30
-      if (timePeriod === '1w') daysBack = 7
-      else if (timePeriod === '3m') daysBack = 90
-      else if (timePeriod === '6m') daysBack = 180
+      const daysBack = { '1w': 7, '1m': 30, '3m': 90, '6m': 180 }[timePeriod]
+      const cutoffDate = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString()
 
-      const cutoffDate = new Date(now.getTime() - daysBack * 24 * 60 * 60 * 1000).toISOString()
-
-      const postsQuery = supabaseAdmin
+      const postsQuery = supabase
         .from('posts')
         .select('platform, format, content, reach, posted_at')
+        .eq('user_id', user.id)
         .gte('posted_at', cutoffDate)
         .order('reach', { ascending: false })
         .limit(100)
 
-      // If platform is already chosen, scope the lookup to that platform
       if (selectedPlatform) postsQuery.eq('platform', selectedPlatform)
 
       const { data: allPosts } = await postsQuery
 
-      if (!allPosts || allPosts.length === 0) {
-        return NextResponse.json(
-          { error: `No posts found. Please scrape your social media first.` },
-          { status: 400 },
-        )
+      if (!allPosts?.length) {
+        return NextResponse.json({ error: 'No posts found. Please scrape your social media first.' }, { status: 400 })
       }
 
       type PostRow = { platform: string; format: string; content: string; reach: number }
       const rows = allPosts as PostRow[]
 
-      // Derive platform (only if not already set)
       if (!selectedPlatform) {
         const counts: Record<string, number> = {}
         for (const p of rows) counts[p.platform] = (counts[p.platform] ?? 0) + 1
@@ -78,7 +64,6 @@ export async function POST(request: NextRequest) {
 
       const platformPosts = rows.filter((p) => p.platform === selectedPlatform)
 
-      // Derive format (only if not already set)
       if (!selectedFormat) {
         const formatStats: Record<string, { count: number; totalReach: number; avgReach: number }> = {}
         for (const p of platformPosts) {
@@ -97,7 +82,6 @@ export async function POST(request: NextRequest) {
         selectedFormat = (videoEntry && videoEntry[1].avgReach > 0 ? videoEntry[0] : topEntry?.[0]) ?? 'Post'
       }
 
-      // Derive topic (only if not already set)
       if (!selectedTopic) {
         const samples = platformPosts.slice(0, 15).map((p) => p.content).filter(Boolean)
         const hashtags: string[] = []
@@ -115,23 +99,17 @@ export async function POST(request: NextRequest) {
     }
 
     if (!selectedPlatform || !selectedFormat || !selectedTopic) {
-      console.error('[simulate] missing required fields:', { selectedPlatform, selectedFormat, selectedTopic })
-      return NextResponse.json(
-        { error: 'platform, format, and topic are required' },
-        { status: 400 },
-      )
+      return NextResponse.json({ error: 'platform, format, and topic are required' }, { status: 400 })
     }
 
-    console.log('[simulate] fetching historical posts for analysis...')
-    const { data: posts } = await supabaseAdmin
+    const { data: posts } = await supabase
       .from('posts')
       .select('format, reach, likes, comments, shares, content, posted_at')
+      .eq('user_id', user.id)
       .eq('platform', selectedPlatform)
       .order('posted_at', { ascending: false })
       .limit(30)
 
-    console.log('[simulate] historical posts count:', posts?.length ?? 0)
-    console.log('[simulate] calling runSimulation...')
     const analysis = await runSimulation(
       selectedPlatform,
       selectedFormat,
@@ -139,13 +117,11 @@ export async function POST(request: NextRequest) {
       settings as Pick<Settings, 'brand_name' | 'niche' | 'tone'>,
       (posts ?? []) as Post[],
     )
-    console.log('[simulate] runSimulation completed, ideas count:', analysis.ideas.length)
 
-    // Save the analytics run first
-    console.log('[simulate] saving simulation run...')
-    const { data: run, error: runError } = await supabaseAdmin
+    const { data: run, error: runError } = await supabase
       .from('simulation_runs')
       .insert({
+        user_id: user.id,
         platform: selectedPlatform,
         format: selectedFormat,
         topic: selectedTopic,
@@ -157,13 +133,10 @@ export async function POST(request: NextRequest) {
       .select('id')
       .single()
 
-    if (runError) {
-      console.error('[simulate] run save error:', runError)
-      throw runError
-    }
+    if (runError) throw runError
 
-    console.log('[simulate] building rows...')
     const rows = analysis.ideas.map((idea) => ({
+      user_id: user.id,
       run_id: run.id,
       platform: selectedPlatform,
       format: selectedFormat,
@@ -186,18 +159,13 @@ export async function POST(request: NextRequest) {
       published: false,
     }))
 
-    console.log('[simulate] inserting rows...')
-    const { data: saved, error: saveError } = await supabaseAdmin
+    const { data: saved, error: saveError } = await supabase
       .from('simulations')
       .insert(rows)
       .select()
 
-    if (saveError) {
-      console.error('[simulate] save error:', saveError)
-      throw saveError
-    }
+    if (saveError) throw saveError
 
-    console.log('[simulate] success, returning response...')
     return NextResponse.json({
       success: true,
       simulations: saved,
@@ -208,10 +176,7 @@ export async function POST(request: NextRequest) {
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
-    const fullError = err instanceof Error ? err.stack : String(err)
     console.error('[simulate] error:', message)
-    console.error('[simulate] full error:', fullError)
-    console.error('[simulate] error object:', err)
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }

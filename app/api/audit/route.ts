@@ -1,57 +1,51 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
+import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { runAudit } from '@/lib/anthropic'
 import type { Post, Settings } from '@/types'
 
 export async function POST(request: NextRequest) {
   try {
+    const supabase = await createSupabaseServerClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
     const body = await request.json() as { platform?: string }
     const { platform } = body
+    if (!platform) return NextResponse.json({ error: 'platform is required' }, { status: 400 })
 
-    if (!platform) {
-      return NextResponse.json({ error: 'platform is required' }, { status: 400 })
+    const [postsRes, settingsRes] = await Promise.all([
+      supabase
+        .from('posts')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('platform', platform)
+        .order('posted_at', { ascending: false })
+        .limit(50),
+      supabase
+        .from('settings')
+        .select('brand_name, niche, tone')
+        .eq('user_id', user.id)
+        .single(),
+    ])
+
+    if (postsRes.error) throw postsRes.error
+    if (!postsRes.data?.length) {
+      return NextResponse.json({ error: 'No posts found for this platform. Run a scrape first.' }, { status: 404 })
     }
-
-    // Fetch last 50 posts for this platform
-    const { data: posts, error: postsError } = await supabaseAdmin
-      .from('posts')
-      .select('*')
-      .eq('platform', platform)
-      .order('posted_at', { ascending: false })
-      .limit(50)
-
-    if (postsError) throw postsError
-    if (!posts || posts.length === 0) {
-      return NextResponse.json(
-        { error: 'No posts found for this platform. Run a scrape first.' },
-        { status: 404 },
-      )
-    }
-
-    // Fetch brand settings
-    const { data: settings, error: settingsError } = await supabaseAdmin
-      .from('settings')
-      .select('brand_name, niche, tone')
-      .limit(1)
-      .single()
-
-    if (settingsError || !settings) {
-      return NextResponse.json(
-        { error: 'Settings not configured. Please set up your brand in Settings.' },
-        { status: 404 },
-      )
+    if (settingsRes.error || !settingsRes.data) {
+      return NextResponse.json({ error: 'Settings not configured. Please set up your brand in Settings.' }, { status: 404 })
     }
 
     const auditResult = await runAudit(
-      posts as Post[],
-      settings as Pick<Settings, 'brand_name' | 'niche' | 'tone'>,
+      postsRes.data as Post[],
+      settingsRes.data as Pick<Settings, 'brand_name' | 'niche' | 'tone'>,
       platform,
     )
 
-    // Save audit to Supabase
-    const { data: savedAudit, error: saveError } = await supabaseAdmin
+    const { data: savedAudit, error: saveError } = await supabase
       .from('audits')
       .insert({
+        user_id: user.id,
         platform,
         summary: auditResult.summary,
         action_items: auditResult.action_items,

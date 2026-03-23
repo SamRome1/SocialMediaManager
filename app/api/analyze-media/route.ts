@@ -1,29 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
+import { createSupabaseServerClient } from '@/lib/supabase/server'
 import { analyzeMedia } from '@/lib/anthropic'
 import type { Post } from '@/types'
 
 export async function POST(request: NextRequest) {
   try {
+    const supabase = await createSupabaseServerClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
     const body = await request.json() as {
-      frames: string[]          // base64 JPEG(s) — 1 for image, up to 3 for video
+      frames: string[]
       mediaType: 'image' | 'video'
       platform: string
       format: string
     }
-
     const { frames, mediaType, platform, format } = body
 
     if (!frames?.length) {
       return NextResponse.json({ error: 'No media provided' }, { status: 400 })
     }
 
-    // Fetch settings + recent posts for context in parallel
     const [settingsRes, postsRes] = await Promise.all([
-      supabaseAdmin.from('settings').select('brand_name, niche, tone').limit(1).single(),
-      supabaseAdmin
+      supabase.from('settings').select('brand_name, niche, tone').eq('user_id', user.id).single(),
+      supabase
         .from('posts')
         .select('format, reach, likes, comments, shares, content, posted_at')
+        .eq('user_id', user.id)
         .eq('platform', platform)
         .order('posted_at', { ascending: false })
         .limit(20),
