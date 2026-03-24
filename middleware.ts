@@ -36,8 +36,10 @@ export async function middleware(request: NextRequest) {
   const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p))
   // Cron is protected by CRON_SECRET header, not user session
   const isCron = pathname === '/api/cron'
+  // Internal endpoints are protected by INTERNAL_API_SECRET header, not user session
+  const isInternal = pathname.startsWith('/api/internal/')
 
-  if (!user && !isPublic && !isCron) {
+  if (!user && !isPublic && !isCron && !isInternal) {
     if (pathname.startsWith('/api/')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
