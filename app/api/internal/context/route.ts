@@ -14,8 +14,7 @@ function isAuthorized(request: NextRequest): boolean {
 
 export async function GET(request: NextRequest) {
   if (!isAuthorized(request)) {
-    const configured = !!process.env.INTERNAL_API_SECRET
-    return NextResponse.json({ error: 'Unauthorized', secret_configured: configured }, { status: 401 })
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   const { searchParams } = new URL(request.url)
@@ -33,8 +32,7 @@ export async function GET(request: NextRequest) {
     let postsQuery = supabaseAdmin
       .from('posts')
       .select('format, content, score, likes, comments, shares, reach, posted_at')
-      .not('score', 'is', null)
-      .order('score', { ascending: false })
+      .order('reach', { ascending: false })
       .limit(10)
 
     if (platform) postsQuery = postsQuery.eq('platform', platform)
