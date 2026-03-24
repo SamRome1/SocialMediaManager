@@ -175,8 +175,7 @@ export async function POST(request: NextRequest) {
       optimal_specs: analysis.optimal_specs,
     })
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error'
-    console.error('[simulate] error:', message)
-    return NextResponse.json({ error: message }, { status: 500 })
+    console.error('[simulate] error:', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

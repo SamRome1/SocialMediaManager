@@ -16,7 +16,7 @@ export async function POST() {
       .eq('user_id', user.id)
       .order('platform')
 
-    if (profilesError) return NextResponse.json({ error: profilesError.message }, { status: 500 })
+    if (profilesError) { console.error('[scrape-all] profiles error:', profilesError); return NextResponse.json({ error: 'Internal server error' }, { status: 500 }) }
     if (!profiles?.length) {
       return NextResponse.json(
         { error: 'No previously scraped accounts found. Scrape at least one account first.' },
@@ -50,9 +50,8 @@ export async function POST() {
         ])
         results.push({ platform, handle, ...postsResult })
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Unknown error'
-        console.error(`[scrape-all] ${platform} (${handle}) error:`, message)
-        results.push({ platform, handle, inserted: 0, skipped: 0, errors: 1, error: message })
+        console.error(`[scrape-all] ${platform} (${handle}) error:`, err)
+        results.push({ platform, handle, inserted: 0, skipped: 0, errors: 1, error: 'Scrape failed' })
       }
     }
 
@@ -61,8 +60,7 @@ export async function POST() {
 
     return NextResponse.json({ success: true, results, totalInserted, totalErrors })
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error'
-    console.error('[scrape-all] fatal error:', message)
-    return NextResponse.json({ error: message }, { status: 500 })
+    console.error('[scrape-all] fatal error:', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

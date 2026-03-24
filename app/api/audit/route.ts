@@ -60,8 +60,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, audit: savedAudit })
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error'
-    console.error('[audit] error:', message)
-    return NextResponse.json({ error: message }, { status: 500 })
+    console.error('[audit] error:', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

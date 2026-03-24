@@ -48,8 +48,7 @@ export async function POST(request: NextRequest) {
       settings: settingsRes.data,
     })
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error'
-    console.error('[dashboard] error:', message)
-    return NextResponse.json({ error: message }, { status: 500 })
+    console.error('[dashboard] error:', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

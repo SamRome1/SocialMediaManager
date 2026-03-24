@@ -39,8 +39,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ analysis })
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error'
-    console.error('[analyze-media] error:', message)
-    return NextResponse.json({ error: message }, { status: 500 })
+    console.error('[analyze-media] error:', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

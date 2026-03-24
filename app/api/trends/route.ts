@@ -40,8 +40,7 @@ export async function POST(request: NextRequest) {
       },
     })
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error'
-    console.error('[trends] error:', message)
-    return NextResponse.json({ error: message }, { status: 500 })
+    console.error('[trends] error:', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

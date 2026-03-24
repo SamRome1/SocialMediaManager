@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { timingSafeEqual } from 'crypto'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { scrapeAndStore, fetchAndStoreProfile } from '@/lib/apify'
 
@@ -6,7 +7,18 @@ export async function GET(request: NextRequest) {
   const authHeader = request.headers.get('Authorization')
   const cronSecret = process.env.CRON_SECRET
 
-  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
+  if (!cronSecret) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const expected = `Bearer ${cronSecret}`
+  const provided = authHeader ?? ''
+  // Use constant-time comparison to prevent timing attacks
+  const expectedBuf = Buffer.from(expected)
+  const providedBuf = Buffer.from(provided.padEnd(expected.length, '\0').slice(0, expected.length))
+  const match = expected.length === provided.length && timingSafeEqual(expectedBuf, providedBuf)
+
+  if (!match) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -19,7 +31,7 @@ export async function GET(request: NextRequest) {
 
     if (settingsError) {
       console.error('[cron] settings error:', settingsError)
-      return NextResponse.json({ error: settingsError.message }, { status: 500 })
+      return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
     }
 
     if (!allSettings?.length) {
@@ -70,8 +82,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ success: true, results: allResults })
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error'
-    console.error('[cron] fatal error:', message)
-    return NextResponse.json({ error: message }, { status: 500 })
+    console.error('[cron] fatal error:', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

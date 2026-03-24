@@ -18,8 +18,8 @@ export async function GET() {
 
     return NextResponse.json(data ?? {})
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error'
-    return NextResponse.json({ error: message }, { status: 500 })
+    console.error('[settings GET] error:', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
 
@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
         .eq('id', existing.id)
         .select()
         .single()
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+      if (error) { console.error('[settings POST] update error:', error); return NextResponse.json({ error: 'Internal server error' }, { status: 500 }) }
       result = data
     } else {
       const { data, error } = await supabase
@@ -53,13 +53,13 @@ export async function POST(request: NextRequest) {
         .insert({ ...body, user_id: user.id, updated_at: new Date().toISOString() })
         .select()
         .single()
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+      if (error) { console.error('[settings POST] insert error:', error); return NextResponse.json({ error: 'Internal server error' }, { status: 500 }) }
       result = data
     }
 
     return NextResponse.json(result)
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error'
-    return NextResponse.json({ error: message }, { status: 500 })
+    console.error('[settings POST] error:', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

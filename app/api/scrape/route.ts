@@ -46,8 +46,7 @@ export async function POST(request: NextRequest) {
       profile: profile ?? null,
     })
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error'
-    console.error('[scrape] error:', message)
-    return NextResponse.json({ error: message }, { status: 500 })
+    console.error('[scrape] error:', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
