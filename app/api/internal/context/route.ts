@@ -14,7 +14,8 @@ function isAuthorized(request: NextRequest): boolean {
 
 export async function GET(request: NextRequest) {
   if (!isAuthorized(request)) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const configured = !!process.env.INTERNAL_API_SECRET
+    return NextResponse.json({ error: 'Unauthorized', secret_configured: configured }, { status: 401 })
   }
 
   const { searchParams } = new URL(request.url)
